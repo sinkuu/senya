@@ -17,13 +17,13 @@ macro_rules! check_path {
 pub type PatternToken = usize;
 
 #[derive(Debug, Clone)]
-pub struct UncompiledPatternSet {
+pub struct PatternSet {
     /// `Pattern`s in more-specific-first order.
     patterns: BTreeMap<Pattern, PatternToken>,
     next_tok: PatternToken,
 }
 
-impl FromIterator<Pattern> for UncompiledPatternSet {
+impl FromIterator<Pattern> for PatternSet {
     fn from_iter<I: IntoIterator<Item = Pattern>>(iter: I) -> Self {
         let mut next_tok = 0;
         let patterns = BTreeMap::from_iter(iter.into_iter().enumerate().map(|(tok, pat)| {
@@ -31,14 +31,20 @@ impl FromIterator<Pattern> for UncompiledPatternSet {
             (pat, tok)
         }));
         next_tok += 1;
-        UncompiledPatternSet { patterns, next_tok }
+        PatternSet { patterns, next_tok }
     }
 }
 
-impl UncompiledPatternSet {
+impl Default for PatternSet {
+    fn default() -> Self {
+        PatternSet::new()
+    }
+}
+
+impl PatternSet {
     #[inline]
     pub fn new() -> Self {
-        UncompiledPatternSet {
+        PatternSet {
             patterns: BTreeMap::new(),
             next_tok: 0,
         }
@@ -46,6 +52,10 @@ impl UncompiledPatternSet {
 
     pub fn len(&self) -> usize {
         self.patterns.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.patterns.is_empty()
     }
 
     #[inline]
@@ -59,15 +69,13 @@ impl UncompiledPatternSet {
         Some(tok)
     }
 
-    pub fn is_match_uncompiled(&self, path: &str) -> bool {
-        self.patterns
-            .keys()
-            .any(|pat| pat.is_match_uncompiled(path))
+    pub fn is_match(&self, path: &str) -> bool {
+        self.patterns.keys().any(|pat| pat.is_match(path))
     }
 
-    pub fn matched_token_uncompiled(&self, path: &str) -> Option<PatternToken> {
+    pub fn matched_token(&self, path: &str) -> Option<PatternToken> {
         for (pat, tok) in &self.patterns {
-            if pat.is_match_uncompiled(path) {
+            if pat.is_match(path) {
                 return Some(*tok);
             }
         }
@@ -75,7 +83,7 @@ impl UncompiledPatternSet {
         None
     }
 
-    pub fn compile(&self) -> PatternSet {
+    pub fn compile(&self) -> CompiledPatternSet {
         let mut map = VecMap::with_capacity(self.patterns.len());
         let re_set = RegexSet::new(self.patterns.iter().enumerate().map(|(i, (pat, &tok))| {
             let re = pat.to_re_string();
@@ -94,13 +102,13 @@ impl UncompiledPatternSet {
             );
             re
         }));
-        PatternSet {
+        CompiledPatternSet {
             re_set: re_set.expect("failed to compile regex"),
             map,
         }
     }
 
-    pub fn prefix(&self, prefix: &Pattern) -> UncompiledPatternSet {
+    pub fn prefix(&self, prefix: &Pattern) -> PatternSet {
         assert!(
             !prefix.terminated(),
             r#""{}" is terminated pattern"#,
@@ -113,13 +121,13 @@ impl UncompiledPatternSet {
             p.terminator = pat.terminator.clone();
             patterns.insert(p, tok);
         }
-        UncompiledPatternSet {
+        PatternSet {
             patterns,
             next_tok: self.next_tok,
         }
     }
 
-    pub fn combine(&mut self, other: &UncompiledPatternSet) {
+    pub fn combine(&mut self, other: &PatternSet) {
         let new_next_tok = self.next_tok + other.next_tok;
         let off = self.next_tok;
         self.patterns.extend(
@@ -133,12 +141,20 @@ impl UncompiledPatternSet {
 }
 
 #[derive(Clone, Debug)]
-pub struct PatternSet {
+pub struct CompiledPatternSet {
     re_set: RegexSet,
     map: VecMap<(PatternToken, Option<Regex>, Vec<String>)>,
 }
 
-impl PatternSet {
+impl CompiledPatternSet {
+    pub fn len(&self) -> usize {
+        self.re_set.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.re_set.len() == 0
+    }
+
     #[inline]
     pub fn is_match(&self, path: &str) -> bool {
         check_path!(path);
@@ -204,7 +220,7 @@ impl Pattern {
     }
 
     /// Tests if this pattern matches with `path`.
-    pub fn is_match_uncompiled(&self, path: &str) -> bool {
+    pub fn is_match(&self, path: &str) -> bool {
         use self::Segment::*;
         use itertools::EitherOrBoth::*;
         use itertools::Position::*;
@@ -244,14 +260,14 @@ impl Pattern {
         true
     }
 
-    fn to_re_string(&self) -> String {
+    // TODO: this should be private
+    pub(crate) fn to_re_string(&self) -> String {
         use self::Segment::*;
         use itertools::Position::*;
 
         let mut out = String::new();
         out.push('^');
 
-        println!("{:?}", self.segments);
         for seg in self.segments.iter().with_position() {
             match *seg.into_inner() {
                 Fixed(ref s) => {
@@ -267,19 +283,25 @@ impl Pattern {
             }
         }
 
-        match self.terminator {
-            Some(Terminator::OptionalSlash) => {
-                out.push_str("/?");
+        if let Some(t) = self.terminator.as_ref() {
+            if !self.segments.is_empty() {
+                out.push('/');
             }
-            Some(Terminator::Tail(..)) => out.push_str("/(.*)"),
-            None => {}
+            match *t {
+                Terminator::OptionalSlash => {
+                    out.push('?');
+                }
+                Terminator::Tail(..) => out.push_str("(.*)"),
+            }
         }
+
 
         out.push('$');
         out
     }
 
-    fn param_names(&self) -> ParamNamesIter {
+    // TODO: this should be private    
+    pub(crate) fn param_names(&self) -> ParamNamesIter {
         ParamNamesIter(&self.segments, 0)
     }
 }
@@ -308,7 +330,6 @@ impl Ord for Pattern {
 
         if len_self == len_other {
             for (a, b) in self.segments.iter().zip(other.segments.iter()) {
-                println!("{:?} {:?}", a, b);
                 match (a, b) {
                     // {a?} ∋ {a}
                     (&Parameter(ref a, oa), &Parameter(ref b, ob)) => {
@@ -372,7 +393,7 @@ impl Display for Pattern {
     }
 }
 
-struct ParamNamesIter<'a>(&'a [Segment], usize);
+pub(crate) struct ParamNamesIter<'a>(&'a [Segment], usize);
 
 impl<'a> Iterator for ParamNamesIter<'a> {
     type Item = &'a str;
@@ -442,9 +463,6 @@ impl FromStr for Pattern {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut pat = Pattern::new();
-
-        let s = if s.starts_with('/') { &s[1..] } else { s };
-
         let mut term = None;
 
         let s = if s.ends_with("/?") {
@@ -461,8 +479,12 @@ impl FromStr for Pattern {
             s
         };
 
-        for p in s.split('/') {
-            pat.push(p.parse()?);
+        let s = if s.starts_with('/') { &s[1..] } else { s };
+
+        if !s.is_empty() || term.is_none() {
+            for p in s.split('/') {
+                pat.push(p.parse()?);
+            }
         }
 
         pat.terminator = term;
@@ -471,43 +493,43 @@ impl FromStr for Pattern {
     }
 }
 
-#[cfg(test)]
 #[test]
 fn test_pattern() {
     let pat1: Pattern = "/foo/bar/{user}".parse().expect("failed to parse");
-    assert!(pat1.is_match_uncompiled("/foo/bar/piyo"));
-    assert!(!pat1.is_match_uncompiled("/foo/bar/piyo/"));
-    assert!(!pat1.is_match_uncompiled("/foo/bar/"));
-    assert!(!pat1.is_match_uncompiled("/foo/bar"));
+    assert!(pat1.is_match("/foo/bar/piyo"));
+    assert!(!pat1.is_match("/foo/bar/piyo/"));
+    assert!(!pat1.is_match("/foo/bar/"));
+    assert!(!pat1.is_match("/foo/bar"));
     assert_eq!(pat1.to_re_string(), "^foo/bar/([^/]+)$");
+    assert!(pat1.param_names().next().unwrap() == "user");
 
     let pat2: Pattern = "/foo/bar/{user?}".parse().expect("failed to parse");
-    assert!(pat2.is_match_uncompiled("/foo/bar/piyo"));
-    assert!(!pat2.is_match_uncompiled("/foo/bar/piyo/"));
-    assert!(pat2.is_match_uncompiled("/foo/bar/"));
-    assert!(!pat2.is_match_uncompiled("/foo/bar"));
+    assert!(pat2.is_match("/foo/bar/piyo"));
+    assert!(!pat2.is_match("/foo/bar/piyo/"));
+    assert!(pat2.is_match("/foo/bar/"));
+    assert!(!pat2.is_match("/foo/bar"));
     assert_eq!(pat2.to_re_string(), "^foo/bar/([^/]*)$");
 
     let pat3: Pattern = "/foo/bar/".parse().expect("failed to parse");
-    assert!(!pat3.is_match_uncompiled("/foo/bar/piyo"));
-    assert!(!pat3.is_match_uncompiled("/foo/bar/piyo/"));
-    assert!(pat3.is_match_uncompiled("/foo/bar/"));
-    assert!(!pat3.is_match_uncompiled("/foo/bar"));
+    assert!(!pat3.is_match("/foo/bar/piyo"));
+    assert!(!pat3.is_match("/foo/bar/piyo/"));
+    assert!(pat3.is_match("/foo/bar/"));
+    assert!(!pat3.is_match("/foo/bar"));
     assert_eq!(pat3.to_re_string(), "^foo/bar/$");
 
     let pat4: Pattern = "/foo/bar/?".parse().expect("failed to parse");
-    assert!(!pat4.is_match_uncompiled("/foo/bar/piyo"));
-    assert!(!pat4.is_match_uncompiled("/foo/bar/piyo/"));
-    assert!(pat4.is_match_uncompiled("/foo/bar/"));
-    assert!(pat4.is_match_uncompiled("/foo/bar"));
+    assert!(!pat4.is_match("/foo/bar/piyo"));
+    assert!(!pat4.is_match("/foo/bar/piyo/"));
+    assert!(pat4.is_match("/foo/bar/"));
+    assert!(pat4.is_match("/foo/bar"));
     assert_eq!(pat4.to_re_string(), "^foo/bar/?$");
 
     let pat5: Pattern = "/foo/bar/:path".parse().expect("failed to parse");
-    assert!(pat5.is_match_uncompiled("/foo/bar/piyo"));
-    assert!(pat5.is_match_uncompiled("/foo/bar/piyo/"));
-    assert!(pat5.is_match_uncompiled("/foo/bar/piyo/piyo"));
-    assert!(pat5.is_match_uncompiled("/foo/bar/"));
-    assert!(!pat5.is_match_uncompiled("/foo/bar"));
+    assert!(pat5.is_match("/foo/bar/piyo"));
+    assert!(pat5.is_match("/foo/bar/piyo/"));
+    assert!(pat5.is_match("/foo/bar/piyo/piyo"));
+    assert!(pat5.is_match("/foo/bar/"));
+    assert!(!pat5.is_match("/foo/bar"));
     assert_eq!(pat5.to_re_string(), "^foo/bar/(.*)$");
 
     assert!(pat2 > pat1);
@@ -520,18 +542,28 @@ fn test_pattern() {
     assert!(pat5 > pat4);
 
     let pats = vec![pat1, pat2, pat3, pat4, pat5];
-    let pset = UncompiledPatternSet::from_iter(pats.clone().into_iter());
+    let pset = PatternSet::from_iter(pats.clone().into_iter());
     assert!(pset.next_tok == 5);
     assert!(pset.patterns.keys().eq(pats.iter()), "{:?}", pset.patterns);
 
-    assert_eq!(pset.matched_token_uncompiled("/foo/bar/"), Some(1)); // `pat3` is unreachable
-    assert_eq!(pset.matched_token_uncompiled("/foo/bar/piyo"), Some(0));
-    assert_eq!(pset.matched_token_uncompiled("/foo/bar"), Some(3));
-    assert_eq!(pset.matched_token_uncompiled("/foo/bar/piyo/"), Some(4));
+    assert_eq!(pset.matched_token("/foo/bar/"), Some(1)); // `pat3` is unreachable
+    assert_eq!(pset.matched_token("/foo/bar/piyo"), Some(0));
+    assert_eq!(pset.matched_token("/foo/bar"), Some(3));
+    assert_eq!(pset.matched_token("/foo/bar/piyo/"), Some(4));
 
     let pset = pset.compile();
     assert_eq!(pset.matched_token("/foo/bar/"), Some(1));
     assert_eq!(pset.matched_token("/foo/bar/piyo"), Some(0));
     assert_eq!(pset.matched_token("/foo/bar"), Some(3));
     assert_eq!(pset.matched_token("/foo/bar/piyo/"), Some(4));
+
+    let p: Pattern = "/:path".parse().unwrap();
+    assert_eq!(p.to_re_string(), "^(.*)$");
+    assert!(p.is_match("/hugahuga"));
+    assert!(p.is_match("/"));
+
+    let p: Pattern = "/".parse().unwrap();
+    assert_eq!(p.to_re_string(), "^$");
+    assert!(!p.is_match("/hugahuga"));
+    assert!(p.is_match("/"));
 }

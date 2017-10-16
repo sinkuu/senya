@@ -18,10 +18,10 @@ impl FromParameters for () {
     }
 }
 
-impl<T> FromParameters for (T,)
+impl<A> FromParameters for (A,)
 where
-    T: FromStr,
-    T::Err: Display,
+    A: FromStr,
+    A::Err: Display,
 {
     fn from_parameters<'a, I: IntoIterator<Item = (&'a str, &'a str)>>(
         params: I,
@@ -31,7 +31,7 @@ where
             .next()
             .ok_or(Cow::from("missing parameter"))?;
         Ok((
-            value.parse().map_err(|e: T::Err| Cow::from(e.to_string()))?,
+            value.parse().map_err(|e: A::Err| Cow::from(e.to_string()))?,
         ))
     }
 }

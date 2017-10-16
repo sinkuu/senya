@@ -1,6 +1,7 @@
 use hyper::Method;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
+use std::iter::FromIterator;
 
 macro_rules! http_method_map {
     ($($hyper_method:tt, $name:ident);+;) => {
@@ -76,6 +77,21 @@ macro_rules! http_method_map {
                     }
                 }
                 None
+            }
+
+            pub fn map<F: Fn(&Method, T) -> U, U>(self, f: F) -> HttpMethodMap<U> {
+                HttpMethodMap {
+                    $($name: self.$name.map(|v| f(&Method::$hyper_method, v))),+,
+                    extensions: HashMap::from_iter(self.extensions.into_iter().map(|(k,v)| {
+                        let k = Method::Extension(k);
+                        let v = f(&k, v);
+                        if let Method::Extension(k) = k {
+                            (k, v)
+                        } else {
+                            unreachable!()
+                        }
+                    })),
+                }
             }
         }
 

@@ -1,7 +1,5 @@
 //! Sen'ya micro web-framework.
 
-#![feature(trace_macros)]
-
 extern crate futures;
 extern crate fxhash;
 extern crate hyper;
@@ -15,15 +13,25 @@ use futures::IntoFuture;
 use hyper::{Request, Response};
 use std::collections::HashMap;
 use std::error::Error;
+use std::ops::Deref;
 
 pub mod pattern;
 pub mod param;
 pub mod router;
+pub mod server;
 pub(crate) mod util;
 
 pub struct Ctx<P = HashMap<String, String>> {
-    pub parameters: P,
-    pub request: Request,
+    pub params: P,
+    request: Request,
+}
+
+impl<P> Deref for Ctx<P> {
+    type Target = Request;
+
+    fn deref(&self) -> &Request {
+        &self.request
+    }
 }
 
 pub trait Handler<P> {
