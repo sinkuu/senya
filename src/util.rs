@@ -13,6 +13,7 @@ macro_rules! http_method_map {
             extensions: HashMap<String, T>,
         }
 
+        #[allow(unused)]
         impl<T> HttpMethodMap<T> {
             pub fn new() -> Self {
                 Self {
@@ -60,6 +61,23 @@ macro_rules! http_method_map {
                     $(Method::$hyper_method => self.$name.is_some()),+,
                     Method::Extension(ref s) => self.extensions.contains_key(s),
                 }
+            }
+
+            pub fn for_each<F: FnMut(&Method, &T) -> Control<B>, B>(&self, mut f: F) -> Option<B> {
+                $(
+                    if let Some(ref val) = self.$name.as_ref() {
+                        if let Control::Break(b) = f(&Method::$hyper_method, val) {
+                            return Some(b);
+                        }
+                    }
+
+                )+
+                for (k, v) in &self.extensions {
+                    if let Control::Break(b) = f(&Method::Extension(k.to_string()), v) {
+                        return Some(b);
+                    }
+                }
+                None
             }
 
             pub fn into_each<F: FnMut(Method, T) -> Control<B>, B>(self, mut f: F) -> Option<B> {

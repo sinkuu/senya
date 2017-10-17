@@ -41,7 +41,7 @@ impl Router {
         let pattern: Pattern = pattern.parse().expect("failed to parse pattern");
         let cpat = pattern.compile();
         let f = move |req: Request| -> Box<Future<Item = Response, Error = Box<Error + Send>>> {
-            // println!("{:?} {:?}", re, pn);
+            // println!("{:?} {:?} {:?}", cpat.re, cpat.params, req.path());
             let params = cpat.path_to_parameters(req.path()).unwrap();
 
             let fut = handler
@@ -191,9 +191,6 @@ fn test_router() {
                 ),
         )
         .compile();
-
-    let set = &b.routes.get(&Method::Get).unwrap().0;
-    assert_eq!(set.len(), 4);
 
     assert!(b.is_match(&Method::Get, "/foo/bar"));
     assert!(b.is_match(&Method::Get, "/foo/bar/baz/"));

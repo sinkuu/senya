@@ -51,14 +51,6 @@ impl PatternSet {
         }
     }
 
-    pub fn len(&self) -> usize {
-        self.patterns.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.patterns.is_empty()
-    }
-
     #[inline]
     pub fn insert(&mut self, pat: Pattern) -> Option<PatternToken> {
         if self.patterns.contains_key(&pat) {
@@ -70,19 +62,19 @@ impl PatternSet {
         Some(tok)
     }
 
-    pub fn is_match(&self, path: &str) -> bool {
-        self.patterns.keys().any(|pat| pat.is_match(path))
-    }
+    // pub fn is_match(&self, path: &str) -> bool {
+    //     self.patterns.keys().any(|pat| pat.is_match(path))
+    // }
 
-    pub fn matched_token(&self, path: &str) -> Option<PatternToken> {
-        for (pat, tok) in &self.patterns {
-            if pat.is_match(path) {
-                return Some(*tok);
-            }
-        }
+    // pub fn matched_token(&self, path: &str) -> Option<PatternToken> {
+    //     for (pat, tok) in &self.patterns {
+    //         if pat.is_match(path) {
+    //             return Some(*tok);
+    //         }
+    //     }
 
-        None
-    }
+    //     None
+    // }
 
     pub fn compile(&self) -> CompiledPatternSet {
         let mut map = VecMap::with_capacity(self.patterns.len());
@@ -138,14 +130,6 @@ pub struct CompiledPatternSet {
 }
 
 impl CompiledPatternSet {
-    pub fn len(&self) -> usize {
-        self.re_set.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.re_set.len() == 0
-    }
-
     #[inline]
     pub fn is_match(&self, path: &str) -> bool {
         check_path!(path);
@@ -161,7 +145,7 @@ impl CompiledPatternSet {
             .matches(path)
             .iter()
             .next()
-            .and_then(|i| self.map.get(i).map(|&tok| tok))
+            .and_then(|i| self.map.get(i).cloned())
     }
 }
 
@@ -174,13 +158,6 @@ pub struct Pattern {
 impl Pattern {
     pub fn new() -> Pattern {
         Default::default()
-    }
-
-    pub fn with_capacity(cap: usize) -> Pattern {
-        Pattern {
-            segments: Vec::with_capacity(cap),
-            terminator: None,
-        }
     }
 
     pub fn terminated(&self) -> bool {
@@ -214,6 +191,7 @@ impl Pattern {
     }
 
     /// Tests if this pattern matches with `path`.
+    #[cfg(test)]
     pub fn is_match(&self, path: &str) -> bool {
         use self::Segment::*;
         use itertools::EitherOrBoth::*;
@@ -259,7 +237,7 @@ impl Pattern {
         use itertools::Position::*;
 
         let mut out = String::new();
-        out.push('^');
+        out.push_str("(?-u:^");
 
         for seg in self.segments.iter().with_position() {
             match *seg.into_inner() {
@@ -284,12 +262,12 @@ impl Pattern {
                 Terminator::OptionalSlash => {
                     out.push('?');
                 }
-                Terminator::Tail(..) => out.push_str("(.*)"),
+                Terminator::Tail(..) => out.push_str(r"([^\s]*)"),
             }
         }
 
 
-        out.push('$');
+        out.push_str("$)");
         out
     }
 
@@ -490,18 +468,23 @@ impl FromStr for Pattern {
 }
 
 pub struct CompiledPattern {
-    re: Regex,
-    params: Vec<String>,
+    pub re: Regex,
+    pub params: Vec<String>,
 }
 
 impl CompiledPattern {
+    // pub fn is_match(&self, path: &str) -> bool {
+    //     check_path!(path);
+    //     self.re.is_match(&path[1..])
+    // }
+
     pub fn path_to_parameters<P: param::FromParameters>(
         &self,
         path: &str,
     ) -> Result<P, Cow<'static, str>> {
         check_path!(path);
 
-        let ci = self.re.captures_iter(path).next().unwrap();
+        let ci = self.re.captures_iter(&path[1..]).next().unwrap();
         let ps = self.params
             .iter()
             .map(|s| s.as_str())
@@ -518,7 +501,7 @@ fn test_pattern() {
     assert!(!pat1.is_match("/foo/bar/piyo/"));
     assert!(!pat1.is_match("/foo/bar/"));
     assert!(!pat1.is_match("/foo/bar"));
-    assert_eq!(pat1.to_re_string(), "^foo/bar/([^/]+)$");
+    assert_eq!(pat1.to_re_string(), "(?-u:^foo/bar/([^/]+)$)");
     assert!(pat1.compile().params == vec!["user"]);
 
     let pat2: Pattern = "/foo/bar/{user?}".parse().expect("failed to parse");
@@ -526,21 +509,21 @@ fn test_pattern() {
     assert!(!pat2.is_match("/foo/bar/piyo/"));
     assert!(pat2.is_match("/foo/bar/"));
     assert!(!pat2.is_match("/foo/bar"));
-    assert_eq!(pat2.to_re_string(), "^foo/bar/([^/]*)$");
+    assert_eq!(pat2.to_re_string(), "(?-u:^foo/bar/([^/]*)$)");
 
     let pat3: Pattern = "/foo/bar/".parse().expect("failed to parse");
     assert!(!pat3.is_match("/foo/bar/piyo"));
     assert!(!pat3.is_match("/foo/bar/piyo/"));
     assert!(pat3.is_match("/foo/bar/"));
     assert!(!pat3.is_match("/foo/bar"));
-    assert_eq!(pat3.to_re_string(), "^foo/bar/$");
+    assert_eq!(pat3.to_re_string(), "(?-u:^foo/bar/$)");
 
     let pat4: Pattern = "/foo/bar/?".parse().expect("failed to parse");
     assert!(!pat4.is_match("/foo/bar/piyo"));
     assert!(!pat4.is_match("/foo/bar/piyo/"));
     assert!(pat4.is_match("/foo/bar/"));
     assert!(pat4.is_match("/foo/bar"));
-    assert_eq!(pat4.to_re_string(), "^foo/bar/?$");
+    assert_eq!(pat4.to_re_string(), "(?-u:^foo/bar/?$)");
 
     let pat5: Pattern = "/foo/bar/:path".parse().expect("failed to parse");
     assert!(pat5.is_match("/foo/bar/piyo"));
@@ -548,7 +531,7 @@ fn test_pattern() {
     assert!(pat5.is_match("/foo/bar/piyo/piyo"));
     assert!(pat5.is_match("/foo/bar/"));
     assert!(!pat5.is_match("/foo/bar"));
-    assert_eq!(pat5.to_re_string(), "^foo/bar/(.*)$");
+    assert_eq!(pat5.to_re_string(), r"(?-u:^foo/bar/([^\s]*)$)");
 
     assert!(pat2 > pat1);
     assert!(pat3 > pat1);
@@ -564,24 +547,24 @@ fn test_pattern() {
     assert!(pset.next_tok == 5);
     assert!(pset.patterns.keys().eq(pats.iter()), "{:?}", pset.patterns);
 
+    // assert_eq!(pset.matched_token("/foo/bar/"), Some(1)); // `pat3` is unreachable
+    // assert_eq!(pset.matched_token("/foo/bar/piyo"), Some(0));
+    // assert_eq!(pset.matched_token("/foo/bar"), Some(3));
+    // assert_eq!(pset.matched_token("/foo/bar/piyo/"), Some(4));
+
+    let pset = pset.compile();
     assert_eq!(pset.matched_token("/foo/bar/"), Some(1)); // `pat3` is unreachable
     assert_eq!(pset.matched_token("/foo/bar/piyo"), Some(0));
     assert_eq!(pset.matched_token("/foo/bar"), Some(3));
     assert_eq!(pset.matched_token("/foo/bar/piyo/"), Some(4));
 
-    let pset = pset.compile();
-    assert_eq!(pset.matched_token("/foo/bar/"), Some(1));
-    assert_eq!(pset.matched_token("/foo/bar/piyo"), Some(0));
-    assert_eq!(pset.matched_token("/foo/bar"), Some(3));
-    assert_eq!(pset.matched_token("/foo/bar/piyo/"), Some(4));
-
     let p: Pattern = "/:path".parse().unwrap();
-    assert_eq!(p.to_re_string(), "^(.*)$");
-    assert!(p.is_match("/hugahuga"));
-    assert!(p.is_match("/"));
+    assert_eq!(p.to_re_string(), r"(?-u:^([^\s]*)$)");
+    // assert!(p.is_match("/hugahuga"));
+    // assert!(p.is_match("/"));
 
     let p: Pattern = "/".parse().unwrap();
-    assert_eq!(p.to_re_string(), "^$");
-    assert!(!p.is_match("/hugahuga"));
-    assert!(p.is_match("/"));
+    assert_eq!(p.to_re_string(), "(?-u:^$)");
+    // assert!(!p.is_match("/hugahuga"));
+    // assert!(p.is_match("/"));
 }
