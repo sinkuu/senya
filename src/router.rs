@@ -68,17 +68,17 @@ impl RouterBuilder {
         let pattern: Pattern = pattern.parse().expect("failed to parse pattern");
         // TODO: factor these thing
         let re = Regex::new(&pattern.to_re_string()).unwrap();
-        let pn = pattern.param_names().map(|s| s.to_string()).collect::<Vec<String>>();
+        let pn = pattern
+            .param_names()
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>();
         let f = move |req: Request| -> Box<Future<Item = Response, Error = Box<Error + Send>>> {
             // println!("{:?} {:?}", re, pn);
             let params = {
-                let ci = re.captures_iter(&req.path()[1..])
-                    .next()
-                    .unwrap();
-                let ps = pn.iter().map(|s| s.as_str()).zip(ci
-                    .iter()
-                    .skip(1)
-                    .map(|i| i.unwrap().as_str()));
+                let ci = re.captures_iter(&req.path()[1..]).next().unwrap();
+                let ps = pn.iter()
+                    .map(|s| s.as_str())
+                    .zip(ci.iter().skip(1).map(|i| i.unwrap().as_str()));
                 // TODO: URL decode, POST body parsing
                 P::from_parameters(ps).unwrap()
             };

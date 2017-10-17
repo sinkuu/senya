@@ -1,11 +1,11 @@
 extern crate hyper;
 extern crate senya;
 
-use senya::router::Router;
-use senya::Ctx;
 use hyper::{Method, Response};
-use std::net::ToSocketAddrs;
+use senya::Ctx;
+use senya::router::Router;
 use std::io;
+use std::net::ToSocketAddrs;
 
 fn main() {
     let rt = Router::builder()

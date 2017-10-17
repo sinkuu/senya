@@ -15,5 +15,5 @@ regex = "0.2.2"
 fxhash = "0.2.1"
 
 [features]
-default = ["simd-accel"]
+#default = ["simd-accel"]
 simd-accel = ["regex/simd-accel"]

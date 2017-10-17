@@ -166,8 +166,11 @@ impl CompiledPatternSet {
     pub fn matched_token(&self, path: &str) -> Option<PatternToken> {
         check_path!(path);
         let path = &path[1..];
-        let i = self.re_set.matches(path).iter().next()?;
-        self.map.get(i).map(|&(tok, _, _)| tok)
+        self.re_set
+            .matches(path)
+            .iter()
+            .next()
+            .and_then(|i| self.map.get(i).map(|&(tok, _, _)| tok))
     }
 }
 
@@ -300,7 +303,7 @@ impl Pattern {
         out
     }
 
-    // TODO: this should be private    
+    // TODO: this should be private
     pub(crate) fn param_names(&self) -> ParamNamesIter {
         ParamNamesIter(&self.segments, 0)
     }
