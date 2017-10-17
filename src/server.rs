@@ -5,15 +5,19 @@ use router::{CompiledRouter, Router};
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use anymap::AnyMap;
 
-pub fn serve(addr: SocketAddr, router: Router) -> hyper::Result<()> {
+// TODO: builder FTW
+
+pub fn serve(addr: SocketAddr, router: Router, data: AnyMap) -> hyper::Result<()> {
     let router = Arc::new(router.compile());
-    let newsvc = HyperNewService(router);
+    let data = Arc::new(data);
+    let newsvc = HyperNewService(router, data);
     let server = Http::new().bind(&addr, newsvc).unwrap();
     server.run()
 }
 
-struct HyperNewService(Arc<CompiledRouter>);
+struct HyperNewService(Arc<CompiledRouter>, Arc<AnyMap>);
 
 impl NewService for HyperNewService {
     type Request = Request;
@@ -23,11 +27,11 @@ impl NewService for HyperNewService {
 
     #[inline]
     fn new_service(&self) -> io::Result<Self::Instance> {
-        Ok(HyperService(Arc::clone(&self.0)))
+        Ok(HyperService(Arc::clone(&self.0), Arc::clone(&self.1)))
     }
 }
 
-struct HyperService(Arc<CompiledRouter>);
+struct HyperService(Arc<CompiledRouter>, Arc<AnyMap>);
 
 impl Service for HyperService {
     type Request = Request;
@@ -43,6 +47,6 @@ impl Service for HyperService {
         //     self.0.is_match(req.method(), req.path())
         // );
         let h = self.0.handler(req.method(), req.path()).unwrap();
-        Box::new(h(req).map_err(|_| unimplemented!()))
+        Box::new(h(req, Arc::clone(&self.1)).map_err(|_| unimplemented!()))
     }
 }

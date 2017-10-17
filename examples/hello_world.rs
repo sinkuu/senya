@@ -11,7 +11,7 @@ fn main() {
     let rt = Router::new()
         .route(
             Method::Get,
-            // Matches everything under `/`.alloc_system
+            // Matches everything under `/`.
             "/:path",
             "hello world!",
         )
@@ -20,7 +20,9 @@ fn main() {
             // Matches `/param/*`.
             // A specific route take precedence of a generic one.
             "/param/{p}",
-            |ctx: Ctx<(String,)>| -> io::Result<Response> { Ok(Response::new().with_body(ctx.params.0)) },
+            |ctx: Ctx<(String,)>| -> io::Result<Response> {
+                Ok(Response::new().with_body(ctx.params.0))
+            },
         );
     senya::server::serve(
         ("localhost", 8080)
@@ -29,5 +31,6 @@ fn main() {
             .next()
             .unwrap(),
         rt,
+        Default::default(),
     ).unwrap();
 }

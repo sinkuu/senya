@@ -1,4 +1,5 @@
 use {Ctx, Handler};
+use anymap::AnyMap;
 use futures::{Future, IntoFuture};
 use hyper::{Method, Request, Response};
 use param::FromParameters;
@@ -15,7 +16,7 @@ macro_rules! check_path {
 }
 
 pub type RouteHandler = Arc<
-    Fn(Request)
+    Fn(Request, Arc<AnyMap>)
         -> Box<Future<Item = Response, Error = Box<Error + Send>>>,
 >;
 
@@ -40,13 +41,16 @@ impl Router {
     ) -> Self {
         let pattern: Pattern = pattern.parse().expect("failed to parse pattern");
         let cpat = pattern.compile();
-        let f = move |req: Request| -> Box<Future<Item = Response, Error = Box<Error + Send>>> {
+        let f = move |req: Request,
+                      data: Arc<AnyMap>|
+              -> Box<Future<Item = Response, Error = Box<Error + Send>>> {
             // println!("{:?} {:?} {:?}", cpat.re, cpat.params, req.path());
             let params = cpat.path_to_parameters(req.path()).unwrap();
 
             let fut = handler
                 .call(Ctx {
                     params,
+                    data: data,
                     request: req,
                 })
                 .into_future()
@@ -75,10 +79,7 @@ impl Router {
             let new = v.0.prefix(&pattern);
             // nll
             if self.routes.contains_key(&k) {
-                self.routes
-                    .get_mut(&k)
-                    .unwrap()
-                    .merge(PathRouter(new, v.1));
+                self.routes.get_mut(&k).unwrap().merge(PathRouter(new, v.1));
             } else {
                 self.routes.insert(k.clone(), PathRouter(new, v.1));
             }
@@ -165,7 +166,9 @@ struct CompiledPathRouter(CompiledPatternSet, VecMap<RouteHandler>);
 impl CompiledPathRouter {
     #[inline]
     fn handler(&self, path: &str) -> Option<RouteHandler> {
-        self.0.matched_token(path).map(|tok| Arc::clone(&self.1[tok]))
+        self.0
+            .matched_token(path)
+            .map(|tok| Arc::clone(&self.1[tok]))
     }
 }
 
@@ -187,7 +190,9 @@ fn test_router() {
                 .route(
                     Method::Get,
                     "/param/{v}",
-                    |ctx: Ctx<(String,)>| -> io::Result<Response> { Ok(Response::new().with_body(ctx.params.0)) },
+                    |ctx: Ctx<(String,)>| -> io::Result<Response> {
+                        Ok(Response::new().with_body(ctx.params.0))
+                    },
                 ),
         )
         .compile();

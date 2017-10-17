@@ -4,6 +4,8 @@ use std::fmt::Display;
 use std::hash::BuildHasher;
 use std::str::FromStr;
 
+// TODO: FromParam / FromParamIter trait
+
 pub trait FromParameters: Sized {
     fn from_parameters<'a, I: IntoIterator<Item = (&'a str, &'a str)>>(
         params: I,
@@ -113,9 +115,7 @@ mod test {
             <(i32, i32)>::from_parameters(vec![]),
             Err(Cow::from("missing parameter"))
         );
-        assert!(
-            <(i32,)>::from_parameters(vec![("foo", "1234"), ("bar", "baz")]).is_err()
-        );
+        assert!(<(i32,)>::from_parameters(vec![("foo", "1234"), ("bar", "baz")]).is_err());
     }
 
     #[test]

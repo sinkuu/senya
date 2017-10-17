@@ -79,10 +79,7 @@ impl PatternSet {
     pub fn compile(&self) -> CompiledPatternSet {
         let mut map = VecMap::with_capacity(self.patterns.len());
         let re_set = RegexSet::new(self.patterns.iter().enumerate().map(|(i, (pat, &tok))| {
-            map.insert(
-                i,
-                tok,
-            );
+            map.insert(i, tok);
             pat.to_re_string()
         }));
         CompiledPatternSet {
@@ -496,6 +493,8 @@ impl CompiledPattern {
 
 #[test]
 fn test_pattern() {
+    use std::iter;
+
     let pat1: Pattern = "/foo/bar/{user}".parse().expect("failed to parse");
     assert!(pat1.is_match("/foo/bar/piyo"));
     assert!(!pat1.is_match("/foo/bar/piyo/"));
@@ -560,11 +559,13 @@ fn test_pattern() {
 
     let p: Pattern = "/:path".parse().unwrap();
     assert_eq!(p.to_re_string(), r"(?-u:^([^\s]*)$)");
-    // assert!(p.is_match("/hugahuga"));
-    // assert!(p.is_match("/"));
+    let p = PatternSet::from_iter(iter::once(p)).compile();
+    assert!(p.is_match("/hugahuga"));
+    assert!(p.is_match("/"));
 
     let p: Pattern = "/".parse().unwrap();
     assert_eq!(p.to_re_string(), "(?-u:^$)");
-    // assert!(!p.is_match("/hugahuga"));
-    // assert!(p.is_match("/"));
+    let p = PatternSet::from_iter(iter::once(p)).compile();
+    assert!(!p.is_match("/hugahuga"));
+    assert!(p.is_match("/"));
 }

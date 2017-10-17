@@ -13,6 +13,7 @@ matches = "0.1.6"
 vec_map = "0.8.0"
 regex = "0.2.2"
 fxhash = "0.2.1"
+anymap = { git = "https://github.com/chris-morgan/anymap" } # to pull in `impl Default for AnyMap`
 
 [features]
 #default = ["simd-accel"]

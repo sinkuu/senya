@@ -1,5 +1,6 @@
 //! Sen'ya micro web-framework.
 
+extern crate anymap;
 extern crate futures;
 extern crate fxhash;
 extern crate hyper;
@@ -9,11 +10,13 @@ extern crate matches;
 extern crate regex;
 extern crate vec_map;
 
+use anymap::AnyMap;
 use futures::IntoFuture;
 use hyper::{Request, Response};
 use std::collections::HashMap;
 use std::error::Error;
 use std::ops::Deref;
+use std::sync::Arc;
 
 pub(crate) mod pattern;
 pub mod param;
@@ -23,7 +26,8 @@ pub(crate) mod util;
 
 pub struct Ctx<P = HashMap<String, String>> {
     pub params: P,
-    request: Request,
+    pub data: Arc<AnyMap>,
+    pub request: Request,
 }
 
 impl<P> Deref for Ctx<P> {
@@ -34,7 +38,7 @@ impl<P> Deref for Ctx<P> {
     }
 }
 
-pub trait Handler<P> {
+pub trait Handler<P>: 'static {
     type Result: IntoFuture<Item = Response, Error = Self::Error> + 'static;
     type Error: Error + Send + 'static;
 
@@ -43,7 +47,7 @@ pub trait Handler<P> {
 
 impl<P, F, R, E> Handler<P> for F
 where
-    F: Fn(Ctx<P>) -> R,
+    F: 'static + Fn(Ctx<P>) -> R,
     R: IntoFuture<Item = Response, Error = E> + 'static,
     E: Error + Send + 'static,
 {
@@ -55,7 +59,7 @@ where
     }
 }
 
-impl<'a> Handler<()> for &'a str {
+impl Handler<()> for &'static str {
     type Result = Result<Response, hyper::Error>;
     type Error = hyper::Error;
 
