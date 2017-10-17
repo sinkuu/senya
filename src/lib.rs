@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::ops::Deref;
 
-pub mod pattern;
+pub(crate) mod pattern;
 pub mod param;
 pub mod router;
 pub mod server;

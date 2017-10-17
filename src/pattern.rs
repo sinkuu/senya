@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use param;
 use regex::{self, Regex, RegexSet};
 use std::borrow::Cow;
 use std::cmp::{Ord, Ordering};
@@ -10,7 +11,7 @@ use vec_map::VecMap;
 
 macro_rules! check_path {
     ($path:expr) => {
-        assert!($path.starts_with('/'), "paths must start with '/'");
+        debug_assert!($path.starts_with('/'), "paths must start with '/'");
     };
 }
 
@@ -86,21 +87,11 @@ impl PatternSet {
     pub fn compile(&self) -> CompiledPatternSet {
         let mut map = VecMap::with_capacity(self.patterns.len());
         let re_set = RegexSet::new(self.patterns.iter().enumerate().map(|(i, (pat, &tok))| {
-            let re = pat.to_re_string();
-            let names = pat.param_names().map(|s| s.to_string()).collect::<Vec<_>>();
             map.insert(
                 i,
-                (
-                    tok,
-                    if names.is_empty() {
-                        None
-                    } else {
-                        Some(Regex::new(&re).expect("failed to compile regex"))
-                    },
-                    names,
-                ),
+                tok,
             );
-            re
+            pat.to_re_string()
         }));
         CompiledPatternSet {
             re_set: re_set.expect("failed to compile regex"),
@@ -127,7 +118,7 @@ impl PatternSet {
         }
     }
 
-    pub fn combine(&mut self, other: &PatternSet) {
+    pub fn merge(&mut self, other: &PatternSet) {
         let new_next_tok = self.next_tok + other.next_tok;
         let off = self.next_tok;
         self.patterns.extend(
@@ -143,7 +134,7 @@ impl PatternSet {
 #[derive(Clone, Debug)]
 pub struct CompiledPatternSet {
     re_set: RegexSet,
-    map: VecMap<(PatternToken, Option<Regex>, Vec<String>)>,
+    map: VecMap<PatternToken>,
 }
 
 impl CompiledPatternSet {
@@ -170,7 +161,7 @@ impl CompiledPatternSet {
             .matches(path)
             .iter()
             .next()
-            .and_then(|i| self.map.get(i).map(|&(tok, _, _)| tok))
+            .and_then(|i| self.map.get(i).map(|&tok| tok))
     }
 }
 
@@ -263,8 +254,7 @@ impl Pattern {
         true
     }
 
-    // TODO: this should be private
-    pub(crate) fn to_re_string(&self) -> String {
+    fn to_re_string(&self) -> String {
         use self::Segment::*;
         use itertools::Position::*;
 
@@ -303,11 +293,36 @@ impl Pattern {
         out
     }
 
-    // TODO: this should be private
-    pub(crate) fn param_names(&self) -> ParamNamesIter {
-        ParamNamesIter(&self.segments, 0)
+    pub fn compile(&self) -> CompiledPattern {
+        struct ParamNamesIter<'a>(&'a [Segment], usize);
+
+        impl<'a> Iterator for ParamNamesIter<'a> {
+            type Item = String;
+
+            fn next(&mut self) -> Option<String> {
+                if self.1 >= self.0.len() {
+                    return None;
+                }
+
+                for i in self.1..self.0.len() {
+                    if let Segment::Parameter(ref name, _) = self.0[i] {
+                        self.1 = i + 1;
+                        return Some(name.to_string());
+                    }
+                }
+
+                self.1 = self.0.len();
+                None
+            }
+        }
+
+        CompiledPattern {
+            re: Regex::new(&self.to_re_string()).expect("regex syntax error"),
+            params: ParamNamesIter(&self.segments, 0).collect::<Vec<String>>(),
+        }
     }
 }
+
 
 impl Ord for Pattern {
     fn cmp(&self, other: &Pattern) -> Ordering {
@@ -396,28 +411,6 @@ impl Display for Pattern {
     }
 }
 
-pub(crate) struct ParamNamesIter<'a>(&'a [Segment], usize);
-
-impl<'a> Iterator for ParamNamesIter<'a> {
-    type Item = &'a str;
-
-    fn next(&mut self) -> Option<&'a str> {
-        if self.1 >= self.0.len() {
-            return None;
-        }
-
-        for i in self.1..self.0.len() {
-            if let Segment::Parameter(ref name, _) = self.0[i] {
-                self.1 = i + 1;
-                return Some(name);
-            }
-        }
-
-        self.1 = self.0.len();
-        None
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 enum Terminator {
     OptionalSlash,
@@ -496,6 +489,28 @@ impl FromStr for Pattern {
     }
 }
 
+pub struct CompiledPattern {
+    re: Regex,
+    params: Vec<String>,
+}
+
+impl CompiledPattern {
+    pub fn path_to_parameters<P: param::FromParameters>(
+        &self,
+        path: &str,
+    ) -> Result<P, Cow<'static, str>> {
+        check_path!(path);
+
+        let ci = self.re.captures_iter(path).next().unwrap();
+        let ps = self.params
+            .iter()
+            .map(|s| s.as_str())
+            .zip(ci.iter().skip(1).map(|i| i.unwrap().as_str()));
+        // TODO: URL decode, POST body parsing
+        P::from_parameters(ps)
+    }
+}
+
 #[test]
 fn test_pattern() {
     let pat1: Pattern = "/foo/bar/{user}".parse().expect("failed to parse");
@@ -504,7 +519,7 @@ fn test_pattern() {
     assert!(!pat1.is_match("/foo/bar/"));
     assert!(!pat1.is_match("/foo/bar"));
     assert_eq!(pat1.to_re_string(), "^foo/bar/([^/]+)$");
-    assert!(pat1.param_names().next().unwrap() == "user");
+    assert!(pat1.compile().params == vec!["user"]);
 
     let pat2: Pattern = "/foo/bar/{user?}".parse().expect("failed to parse");
     assert!(pat2.is_match("/foo/bar/piyo"));

@@ -8,14 +8,20 @@ use std::io;
 use std::net::ToSocketAddrs;
 
 fn main() {
-    let rt = Router::builder()
-        .route(Method::Get, "/:path", "hello world!")
+    let rt = Router::new()
         .route(
             Method::Get,
-            "/param/{p}", // most specific route is chosen
-            |ctx: Ctx<(String,)>| -> io::Result<Response> { Ok(Response::new().with_body(ctx.params.0)) },
+            // Matches everything under `/`.alloc_system
+            "/:path",
+            "hello world!",
         )
-        .build();
+        .route(
+            Method::Get,
+            // Matches `/param/*`.
+            // A specific route take precedence of a generic one.
+            "/param/{p}",
+            |ctx: Ctx<(String,)>| -> io::Result<Response> { Ok(Response::new().with_body(ctx.params.0)) },
+        );
     senya::server::serve(
         ("localhost", 8080)
             .to_socket_addrs()

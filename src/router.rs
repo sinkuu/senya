@@ -8,51 +8,25 @@ use std::sync::Arc;
 use util::{Control, HttpMethodMap};
 use vec_map::VecMap;
 
+macro_rules! check_path {
+    ($path:expr) => {
+        debug_assert!($path.starts_with('/'), "paths must start with '/'");
+    };
+}
+
 pub type RouteHandler = Arc<
     Fn(Request)
-        -> Box<Future<Item = Response, Error = Box<Error + Send + 'static>> + 'static>,
+        -> Box<Future<Item = Response, Error = Box<Error + Send>>>,
 >;
 
 pub struct Router {
-    routes: HttpMethodMap<CompiledPathRouter>,
-}
-
-impl Router {
-    #[inline]
-    pub fn builder() -> RouterBuilder {
-        RouterBuilder::new()
-    }
-
-    #[inline]
-    pub fn is_match(&self, method: &Method, path: &str) -> bool {
-        assert!(path.starts_with('/'));
-
-        if let Some(pr) = self.routes.get(method) {
-            pr.0.is_match(path)
-        } else {
-            false
-        }
-    }
-
-    pub fn handler(&self, method: &Method, path: &str) -> Option<RouteHandler> {
-        assert!(path.starts_with('/'));
-
-        if let Some(pr) = self.routes.get(method) {
-            pr.0.matched_token(path).map(|tok| pr.1[tok].clone())
-        } else {
-            None
-        }
-    }
-}
-
-pub struct RouterBuilder {
     routes: HttpMethodMap<PathRouter>,
     // err_routes: UncompiledPathRouter,
 }
 
-impl RouterBuilder {
-    fn new() -> Self {
-        RouterBuilder {
+impl Router {
+    pub fn new() -> Self {
+        Router {
             routes: HttpMethodMap::new(),
             // err_routes: HttpMethodMap::new(),
         }
@@ -64,24 +38,11 @@ impl RouterBuilder {
         pattern: &str,
         handler: H,
     ) -> Self {
-        use regex::Regex;
         let pattern: Pattern = pattern.parse().expect("failed to parse pattern");
-        // TODO: factor these thing
-        let re = Regex::new(&pattern.to_re_string()).unwrap();
-        let pn = pattern
-            .param_names()
-            .map(|s| s.to_string())
-            .collect::<Vec<String>>();
+        let cpat = pattern.compile();
         let f = move |req: Request| -> Box<Future<Item = Response, Error = Box<Error + Send>>> {
             // println!("{:?} {:?}", re, pn);
-            let params = {
-                let ci = re.captures_iter(&req.path()[1..]).next().unwrap();
-                let ps = pn.iter()
-                    .map(|s| s.as_str())
-                    .zip(ci.iter().skip(1).map(|i| i.unwrap().as_str()));
-                // TODO: URL decode, POST body parsing
-                P::from_parameters(ps).unwrap()
-            };
+            let params = cpat.path_to_parameters(req.path()).unwrap();
 
             let fut = handler
                 .call(Ctx {
@@ -108,7 +69,7 @@ impl RouterBuilder {
         self
     }
 
-    pub fn mount(mut self, pattern: &str, b: RouterBuilder) -> Self {
+    pub fn mount(mut self, pattern: &str, b: Router) -> Self {
         let pattern = pattern.parse().expect("failed to parse pattern");
         b.routes.into_each(|k, v| -> Control<()> {
             let new = v.0.prefix(&pattern);
@@ -117,7 +78,7 @@ impl RouterBuilder {
                 self.routes
                     .get_mut(&k)
                     .unwrap()
-                    .combine(PathRouter(new, v.1));
+                    .merge(PathRouter(new, v.1));
             } else {
                 self.routes.insert(k.clone(), PathRouter(new, v.1));
             }
@@ -126,13 +87,52 @@ impl RouterBuilder {
         self
     }
 
-    pub fn build(self) -> Router {
-        Router {
+    pub fn compile(self) -> CompiledRouter {
+        CompiledRouter {
             routes: self.routes.map(|_, value| value.compile()),
         }
     }
 }
 
+impl Default for Router {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct CompiledRouter {
+    routes: HttpMethodMap<CompiledPathRouter>,
+}
+
+impl CompiledRouter {
+    #[inline]
+    pub fn is_match(&self, method: &Method, path: &str) -> bool {
+        check_path!(path);
+
+        if let Some(pr) = self.routes.get(method) {
+            pr.0.is_match(path)
+        } else {
+            false
+        }
+    }
+
+    #[inline]
+    pub fn handler(&self, method: &Method, path: &str) -> Option<RouteHandler> {
+        check_path!(path);
+
+        if let Some(pr) = self.routes.get(method) {
+            pr.handler(path)
+        } else {
+            None
+        }
+    }
+}
+
+impl From<Router> for CompiledRouter {
+    fn from(r: Router) -> Self {
+        r.compile()
+    }
+}
 
 struct PathRouter(PatternSet, VecMap<RouteHandler>);
 
@@ -143,7 +143,7 @@ impl PathRouter {
 
     fn route(&mut self, pattern: Pattern, handler: RouteHandler) -> &mut Self {
         let n = self.1.len();
-        assert!(self.0.insert(pattern) == Some(n));
+        assert_eq!(self.0.insert(pattern), Some(n));
         self.1.insert(n, handler);
         self
     }
@@ -152,8 +152,8 @@ impl PathRouter {
         CompiledPathRouter(self.0.compile(), self.1)
     }
 
-    fn combine(&mut self, other: PathRouter) {
-        self.0.combine(&other.0);
+    fn merge(&mut self, other: PathRouter) {
+        self.0.merge(&other.0);
         let ofs = self.1.len();
         self.1
             .extend(other.1.into_iter().map(|(k, v)| (k + ofs, v)));
@@ -162,11 +162,18 @@ impl PathRouter {
 
 struct CompiledPathRouter(CompiledPatternSet, VecMap<RouteHandler>);
 
+impl CompiledPathRouter {
+    #[inline]
+    fn handler(&self, path: &str) -> Option<RouteHandler> {
+        self.0.matched_token(path).map(|tok| Arc::clone(&self.1[tok]))
+    }
+}
+
 #[test]
 fn test_router() {
     use std::io;
 
-    let b = Router::builder()
+    let b = Router::new()
         .route(
             Method::Get,
             "/foo/bar",
@@ -175,7 +182,7 @@ fn test_router() {
         .route(Method::Get, "/foo/bar/baz/?", "hello!!!")
         .mount(
             "/piyo",
-            Router::builder()
+            Router::new()
                 .route(Method::Get, "/piyo", "/piyo/piyo")
                 .route(
                     Method::Get,
@@ -183,7 +190,7 @@ fn test_router() {
                     |ctx: Ctx<(String,)>| -> io::Result<Response> { Ok(Response::new().with_body(ctx.params.0)) },
                 ),
         )
-        .build();
+        .compile();
 
     let set = &b.routes.get(&Method::Get).unwrap().0;
     assert_eq!(set.len(), 4);
