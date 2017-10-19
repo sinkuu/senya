@@ -285,7 +285,6 @@ impl Pattern {
                         return Some(name.to_string());
                     }
                 }
-
                 self.1 = self.0.len();
                 None
             }
@@ -293,7 +292,13 @@ impl Pattern {
 
         CompiledPattern {
             re: Regex::new(&self.to_re_string()).expect("regex syntax error"),
-            params: ParamNamesIter(&self.segments, 0).collect::<Vec<String>>(),
+            params: ParamNamesIter(&self.segments, 0)
+                .chain(if let Some(Terminator::Tail(ref name)) = self.terminator {
+                    Some(name.to_string())
+                } else {
+                    None
+                })
+                .collect::<Vec<String>>(),
         }
     }
 }

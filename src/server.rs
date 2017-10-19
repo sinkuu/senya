@@ -47,6 +47,6 @@ impl Service for HyperService {
         //     self.0.is_match(req.method(), req.path())
         // );
         let h = self.0.handler(req.method(), req.path()).unwrap();
-        Box::new(h(req, Arc::clone(&self.1)).map_err(|_| unimplemented!()))
+        Box::new(h(req, Arc::clone(&self.1)).map_err(|e| unimplemented!("error occured: {}", e)))
     }
 }

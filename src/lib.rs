@@ -3,12 +3,18 @@
 extern crate anymap;
 extern crate futures;
 extern crate fxhash;
+#[macro_use]
 extern crate hyper;
 extern crate itertools;
 #[macro_use]
 extern crate matches;
+#[cfg(test)]
+#[macro_use]
+extern crate pretty_assertions;
 extern crate regex;
+extern crate url;
 extern crate vec_map;
+extern crate mime_guess;
 
 use anymap::AnyMap;
 use futures::IntoFuture;
@@ -18,10 +24,11 @@ use std::error::Error;
 use std::ops::Deref;
 use std::sync::Arc;
 
-pub(crate) mod pattern;
+pub(crate) mod pattern; // TODO: move this to src/router/pattern.rs?
 pub mod param;
 pub mod router;
 pub mod server;
+pub mod serve_static;
 pub(crate) mod util;
 
 pub struct Ctx<P = HashMap<String, String>> {

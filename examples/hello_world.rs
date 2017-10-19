@@ -4,6 +4,7 @@ extern crate senya;
 use hyper::{Method, Response};
 use senya::Ctx;
 use senya::router::Router;
+use senya::serve_static::ServeStatic;
 use std::io;
 use std::net::ToSocketAddrs;
 
@@ -18,12 +19,13 @@ fn main() {
         .route(
             Method::Get,
             // Matches `/param/*`.
-            // A specific route take precedence of a generic one.
+            // A specific route takes precedence of a generic one.
             "/param/{p}",
-            |ctx: Ctx<(String,)>| -> io::Result<Response> {
-                Ok(Response::new().with_body(ctx.params.0))
+            |ctx: Ctx| -> io::Result<Response> {
+                Ok(Response::new().with_body(format!("p = {}", ctx.params["p"])))
             },
-        );
+        )
+        .route(Method::Get, "/static/:path", ServeStatic::new("./examples"));
     senya::server::serve(
         ("localhost", 8080)
             .to_socket_addrs()
